@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AO Reflex Racer</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #game {
+      margin-top: 20px;
+      border: 2px solid #333;
+    }
+
+    #walletInfo {
+      margin-top: 15px;
+    }
+
+    button {
+      padding: 10px 20px;
+      background: #2196f3;
+      border: none;
+      border-radius: 4px;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #1976d2;
+    }
+  </style>
+</head>
+<body>
+  <h1>AO Reflex Racer</h1>
+  
+  <!-- Wallet Information Section -->
+  <div id="walletInfo">
+    <button id="connectWallet">Connect MetaMask</button>
+    <p id="walletAddress">Wallet not connected</p>
+  </div>
+  
+  <div id="game"></div>
+
+  <!-- Load Phaser -->
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+
+  <!-- Load ethers.js -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+
+  <!-- Connect MetaMask Script -->
+  <script>
+    const connectWalletBtn = document.getElementById('connectWallet');
+    const walletAddressText = document.getElementById('walletAddress');
+    const walletAddress = '0x482872D06424B98051FA569Cb8740E33Ba6Ea7cc'; // Your provided wallet address
+    
+    // Function to connect MetaMask
+    connectWalletBtn.addEventListener('click', async () => {
+      if (typeof window.ethereum !== 'undefined' && window.ethereum.isMetaMask) {
+        try {
+          const provider = new ethers.providers.Web3Provider(window.ethereum);
+          await provider.send('eth_requestAccounts', []); // Request access to MetaMask accounts
+          const signer = provider.getSigner();
+          const address = await signer.getAddress(); // Get connected address
+          walletAddressText.textContent = `Connected: ${address}`;
+        } catch (error) {
+          console.error('User rejected wallet connection:', error);
+          walletAddressText.textContent = '❌ Connection rejected.';
+        }
+      } else {
+        alert('MetaMask not found. Please install MetaMask from https://metamask.io');
+      }
+    });
+
+    // Auto-connect on page load if MetaMask was previously connected
+    window.addEventListener('load', async () => {
+      if (window.ethereum) {
+        const provider = new ethers.providers.Web3Provider(window.ethereum);
+        const accounts = await provider.listAccounts();
+        if (accounts.length > 0) {
+          const address = accounts[0];
+          walletAddressText.textContent = `Connected: ${address}`;
+        }
+      }
+    });
+  </script>
+
+  <!-- Your game logic -->
+  <script>
+    // Leaderboard functions (localStorage for testing)
+    function submitScore(name, score) {
+        let leaderboard = getLeaderboard();
+        leaderboard.push({ name, score });
+        leaderboard.sort((a, b) => b.score - a.score);
+        localStorage.setItem('leaderboard', JSON.stringify(leaderboard));
+    }
+
+    function getLeaderboard() {
+        let leaderboard = JSON.parse(localStorage.getItem('leaderboard') || '[]');
+        return leaderboard;
+    }
+
+    // Start Scene
+    class StartScene extends Phaser.Scene {
+        constructor() {
+            super('StartScene');
+        }
+
+        preload() {
+            this.load.image('background', 'assets/space-bg.png');
+            this.load.image('play-button', 'assets/play-button.png');
+        }
+
+        create() {
+            this.add.image(400, 300, 'background');
+
+            this.add.text(400, 150, 'AO Reflex Racer', {
+                fontSize: '48px',
+                fontFamily: 'Arial',
+                color: '#ffffff',
+            }).setOrigin(0.5);
+
+            this.add.text(400, 250, 'Click targets as fast as you can!', {
+                fontSize: '24px',
+                fontFamily: 'Arial',
+                color: '#ffffff',
+            }).setOrigin(0.5);
+
+            const playButton = this.add.image(400, 350, 'play-button').setInteractive().setScale(0.5);
+            playButton.on('pointerdown', () => this.scene.start('GameScene'));
+
+            let leaderboard = getLeaderboard();
+            let text = 'Leaderboard:\n';
+            leaderboard.slice(0, 10).forEach((entry, i) => {
+                text += `${i + 1}. ${entry.name}: ${entry.score}\n`;
+            });
+            this.add.text(400, 450, text, {
+                fontSize: '20px',
+                fontFamily: 'Arial',
+                color: '#ffffff',
+                align: 'center',
+            }).setOrigin(0.5);
+        }
+    }
+
+    // Game Scene
+    class GameScene extends Phaser.Scene {
+        constructor() {
+            super('GameScene');
+        }
+
+        preload() {
+            this.load.image('target', 'assets/target.png');
+            this.load.image('background', 'assets/space-bg.png');
+        }
+
+        create() {
+            this.add.image(400, 300, 'background');
+
+            this.score = 0;
+            this.timeLeft = 30;
+            this.targets = this.add.group();
+
+            this.scoreText = this.add.text(10, 10, 'Score: 0', {
+                fontSize: '24px',
+                fontFamily: 'Arial',
+                color: '#ffffff',
+            });
+            this.timerText = this.add.text(650, 10, 'Time: 30', {
+                fontSize: '24px',
+                fontFamily: 'Arial',
+                color: '#ffffff',
+            });
+
+            this.time.addEvent({
+                delay: 1000,
+                callback: this.spawnTarget,
+                callbackScope: this,
+                loop: true,
+            });
+
+            this.time.addEvent({
+                delay: 1000,
+                callback: () => {
+                    this.timeLeft--;
+                    this.timerText.setText(`Time: ${this.timeLeft}`);
+                    if (this.timeLeft <= 0) {
+                        this.scene.start('GameOverScene', { score: this.score });
+                    }
+                },
+                callbackScope: this,
+                repeat: 30,
+            });
+        }
+
+        spawnTarget() {
+            const x = Phaser.Math.Between(50, 750);
+            const y = Phaser.Math.Between(50, 550);
+            const target = this.add.sprite(x, y, 'target').setInteractive().setScale(1);
+            this.targets.add(target);
+            target.on('pointerdown', () => this.hitTarget(target));
+
+            this.tweens.add({
+                targets: target,
+                scale: 0.2,
+                duration: 5000,
+                onComplete: () => target.destroy(),
+            });
+
+            this.physics.add.existing(target);
+            target.body.setVelocity(
+                Phaser.Math.Between(-100, 100),
+                Phaser.Math.Between(-100, 100)
+            );
+        }
+
+        hitTarget(target) {
+            const bonus = target.scale < 0.5 ? 5 : 0;
+            this.score += 10 + bonus;
+            this.scoreText.setText(`Score: ${this.score}`);
+            target.destroy();
+        }
+    }
+
+    // Game Over Scene
+    class GameOverScene extends Phaser.Scene {
+        constructor() {
+            super('GameOverScene');
+        }
+
+        preload() {
+            this.load.image('background', 'assets/space-bg.png');
+            this.load.image('play-button', 'assets/play-button.png');
+            this.load.image('submit-button', 'assets/submit-button.png');
+        }
+
+        init(data) {
+            this.score = data.score || 0;
+        }
+
+        create() {
+            this.add.image(400, 300, 'background');
+
+            this.add.text(400, 150, `Game Over! Score: ${this.score}`, {
+                fontSize: '32px',
+                fontFamily: 'Arial',
+                color: '#ffffff',
+            }).setOrigin(0.5);
+
+            const nameInput = this.add.dom(400, 220, 'input', {
+                type: 'text',
+                placeholder: 'Enter your name',
+                fontSize: '20px',
+                width: '200px',
+                backgroundColor: '#ffffff',
+            }).setOrigin(0.5);
+
+            const submitButton = this.add.image(400, 280, 'submit-button').setInteractive().setScale(0.5);
+            submitButton.on('pointerdown', () => {
+                const name = nameInput.node.value.trim() || 'Anonymous';
+                submitScore(name, this.score);
+                this.scene.start('StartScene');
+            });
+
+            const replayButton = this.add.image(400, 340, 'play-button').setInteractive().setScale(0.5);
+            replayButton.on('pointerdown', () => this.scene.start('GameScene'));
+
+            let leaderboard = getLeaderboard();
+            let text = 'Leaderboard:\n';
+            leaderboard.slice(0, 10).forEach((entry, i) => {
+                text += `${i + 1}. ${entry.name}: ${entry.score}\n`;
+            });
+            this.add.text(400, 400, text, {
+                fontSize: '20px',
+                fontFamily: 'Arial',
+                color: '#ffffff',
+                align: 'center',
+            }).setOrigin(0.5);
+        }
+    }
+
+    // Game configuration and initialization
+    const config = {
+        type: Phaser.AUTO,
+        width: 800,
+        height: 600,
+        scale: {
+            mode: Phaser.Scale.FIT,
+            autoCenter: Phaser.Scale.CENTER_BOTH,
+        },
+        scene: [StartScene, GameScene, GameOverScene],
+    };
+
+    const game = new Phaser.Game(config);
+  </script>
+
+</body>
+</html>
